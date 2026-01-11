@@ -69,5 +69,3 @@ Advanced access control and verification system with Discord integration.
 Each plugin can be configured through the IW4MAdmin configuration interface or by editing the plugin files directly.
 
 ---
-
-**Repository:** [yashan223/xoxo-plugins](https://github.com/yashan223/xoxo-plugins)
