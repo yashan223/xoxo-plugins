@@ -11,9 +11,9 @@ const profileAccessControlKey = 'Webfront::Profile::AccessControl';
 
 // Discord bot integration
 const IO = importNamespace('System.IO');
-const verificationFilePath = 'c:\\Users\\xoxod33p\\Desktop\\iw4m\\xoxobot\\in_game_verifications.json';
-const linkedProfilesFilePath = 'c:\\Users\\xoxod33p\\Desktop\\iw4m\\xoxobot\\linked_profiles.json';
-const manualAllowedFilePath = 'c:\\Users\\xoxod33p\\Desktop\\iw4m\\xoxobot\\manual_allowed.json';
+const verificationFilePath = '/home/deep/cod4/xoxo-bot/in_game_verifications.json';
+const linkedProfilesFilePath = '/home/deep/cod4/xoxo-bot/linked_profiles.json';
+const manualAllowedFilePath = '/home/deep/cod4/xoxo-bot/manual_allowed.json';
 
 const init = (registerNotify, serviceResolver, configWrapper, pluginHelper) => {
     registerNotify('IManagementEventSubscriptions.ClientStateInitialized', (initializedEvent, token) => plugin.onClientInitialized(initializedEvent, token));
@@ -29,13 +29,12 @@ const plugin = {
     configWrapper: null,
     logger: null,
     serviceResolver: null,
-    translations: null,
     pluginHelper: null,
     enabled: true,
 
     commands: [{
         name: 'setclientidthreshold',
-        description: 'Set the client ID threshold for verification requirement',
+        description: 'Set the Client ID threshold for access control',
         alias: 'setid',
         permission: 'SeniorAdmin',
         targetRequired: false,
@@ -51,12 +50,12 @@ const plugin = {
             }
             clientIdThreshold = newThreshold;
             plugin.configWrapper.setValue('clientIdThreshold', newThreshold);
-            gameEvent.origin.tell(`Client ID threshold set to ${newThreshold}. Players above this ID will require verification.`);
+            gameEvent.origin.tell(`^2Client ID threshold updated to ^5${newThreshold}^2. Players above this ID will require verification to access monitored servers.`);
         }
     },
     {
         name: 'setmonitoredports',
-        description: 'Set which server ports require verification (comma-separated)',
+        description: 'Set which server ports require access control (comma-separated)',
         alias: 'setports',
         permission: 'SeniorAdmin',
         targetRequired: false,
@@ -72,12 +71,12 @@ const plugin = {
             }
             monitoredPorts = portsInput;
             plugin.configWrapper.setValue('monitoredPorts', portsInput);
-            gameEvent.origin.tell(`Monitored ports set to: ${portsInput.join(', ')}`);
+            gameEvent.origin.tell(`^2Monitored ports updated to: ^5${portsInput.join(', ')}`);
         }
     },
     {
         name: 'allowplayer',
-        description: 'Verify a player to allow connection',
+        description: 'Grant server access to a player',
         alias: 'ap',
         permission: 'SeniorAdmin',
         targetRequired: true,
@@ -95,12 +94,12 @@ const plugin = {
             plugin.syncManualAllowedToFile(); // Sync manual list to Discord bot
             plugin.syncLinkedProfiles(); // Sync with Discord bot after manual change
 
-            gameEvent.origin.tell(`Successfully verified ${gameEvent.target.name} to connect to the server`);
+            gameEvent.origin.tell(`^2Successfully granted server access to ^5${gameEvent.target.name}`);
         }
     },
     {
         name: 'disallowplayer',
-        description: 'Remove a player verification',
+        description: 'Revoke server access from a player',
         alias: 'dp',
         permission: 'SeniorAdmin',
         targetRequired: true,
@@ -116,7 +115,7 @@ const plugin = {
             plugin.syncManualAllowedToFile(); // Sync manual list to Discord bot
             plugin.syncLinkedProfiles(); // Sync with Discord bot after manual change
 
-            gameEvent.origin.tell(`${gameEvent.target.name} verification removed`);
+            gameEvent.origin.tell(`^1Server access revoked for ^5${gameEvent.target.name}`);
             
             // Check if the player is currently connected
             if (gameEvent.target.isConnected) {
@@ -126,19 +125,19 @@ const plugin = {
     },
     {
         name: 'listpendingverifications',
-        description: 'List all pending Discord verifications',
+        description: 'List all pending Discord verification codes',
         alias: 'lpv',
         permission: 'Moderator',
         targetRequired: false,
         execute: (gameEvent) => {
             const codes = Object.keys(pendingVerifications);
             if (codes.length === 0) {
-                gameEvent.origin.tell('No pending verifications.');
+                gameEvent.origin.tell('^3No pending verification codes.');
                 return;
             }
             
             const now = Date.now();
-            gameEvent.origin.tell(`^5Pending Verifications (${codes.length}):`);
+            gameEvent.origin.tell(`^5Pending Verification Codes (${codes.length}):`);
             codes.forEach(code => {
                 const verification = pendingVerifications[code];
                 const ageMs = now - verification.timestamp;
@@ -150,7 +149,7 @@ const plugin = {
     },
     {
         name: 'cleanverifications',
-        description: 'Manually clean expired verifications',
+        description: 'Manually remove expired verification codes',
         alias: 'cv',
         permission: 'SeniorAdmin',
         targetRequired: false,
@@ -179,19 +178,19 @@ const plugin = {
             interactionData.actionMeta.add('ShouldRefresh', true.toString()); // indicates that the page should refresh after performing the action
 
             if (allowedPlayerIds.includes(parseInt(targetId))) {
-                interactionData.name = 'Remove Verification';
-                interactionData.displayMeta = 'oi-circle-x';
+                interactionData.name = 'Revoke Access';
+                interactionData.displayMeta = 'ph-x-circle';
 
-                interactionData.actionMeta.add('Data', `disallowplayer`);
-                interactionData.actionMeta.add('ActionButtonLabel', 'Remove Verification');
-                interactionData.actionMeta.add('Name', 'Remove Player Verification');
+                interactionData.actionMeta.add('Data', `disallowplayer @${targetId}`);
+                interactionData.actionMeta.add('ActionButtonLabel', 'Revoke Access');
+                interactionData.actionMeta.add('Name', 'Revoke Server Access');
             } else {
-                interactionData.name = 'Verify Player';
-                interactionData.displayMeta = 'oi-circle-check';
+                interactionData.name = 'Grant Access';
+                interactionData.displayMeta = 'ph-check-circle';
 
-                interactionData.actionMeta.add('Data', `allowplayer`);
-                interactionData.actionMeta.add('ActionButtonLabel', 'Verify Player');
-                interactionData.actionMeta.add('Name', 'Verify Player for Access');
+                interactionData.actionMeta.add('Data', `allowplayer @${targetId}`);
+                interactionData.actionMeta.add('ActionButtonLabel', 'Grant Access');
+                interactionData.actionMeta.add('Name', 'Grant Server Access');
             }
 
             return interactionData;
@@ -203,60 +202,57 @@ const plugin = {
             const helpers = importNamespace('SharedLibraryCore.Helpers');
             const interactionData = new helpers.InteractionData();
 
-            interactionData.name = 'Verified Players';
-            interactionData.description = 'Manage verified players';
-            interactionData.displayMeta = 'oi-badge';
+            interactionData.name = 'Access Control';
+            interactionData.description = 'Manage players authorized to access monitored servers';
+            interactionData.displayMeta = 'ph-identification-badge';
             interactionData.interactionId = accessControlListKey;
             interactionData.minimumPermission = 3;
             interactionData.interactionType = 2;
             interactionData.source = plugin.name;
 
             interactionData.scriptAction = (sourceId, targetId, game, meta, token) => {
-                const clientsData = plugin.getClientsData(allowedPlayerIds);
+                try {
+                    const clientsData = plugin.getClientsData(allowedPlayerIds);
 
-                let table = '<table class="table bg-dark-dm bg-light-lm">';
-                let header = `<tr>
-                                <th>Player Name</th>
-                                <th>Action</th>
-                              </tr>`;
+                    let table = '<table class="w-full text-left border-collapse">';
 
-                const disallowInteraction = {
-                    InteractionId: 'command',
-                    Data: 'disallowplayer',
-                    ActionButtonLabel: 'Remove Verification',
-                    Name: 'Remove Player Verification'
-                };
+                    if (clientsData.length === 0) {
+                        table += `<tr><td colspan="2" class="px-6 py-8 text-center text-muted">No players have been granted access yet.</td></tr>`;
+                    } else {
+                        clientsData.forEach(client => {
+                            const disallowInteraction = {
+                                InteractionId: 'command',
+                                Data: `disallowplayer @${client.clientId}`,
+                                ActionButtonLabel: 'Revoke Access',
+                                Name: 'Revoke Server Access'
+                            };
+                            
+                            const playerName = plugin.escapeHtml(client.currentAlias?.name?.stripColors() || 'Unknown');
+                            
+                            table += `<tr class="border-t border-line hover:bg-surface-hover/30 transition-colors">
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <a href="/Client/Profile/${client.clientId}" class="text-sm font-medium hover:text-primary transition-colors">${playerName}</a>
+                                        </td>
+                                        <td class="px-6 py-4 text-right">
+                                            <button type="button" class="profile-action cursor-pointer" data-action="DynamicAction" data-action-id="${client.clientId}"
+                                               data-action-meta="${encodeURI(JSON.stringify(disallowInteraction))}">
+                                                <div class="inline-flex items-center px-3 py-1.5 rounded-lg bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 transition-colors text-sm font-medium">
+                                                    <i class="ph ph-x-circle mr-2 text-sm"></i>
+                                                    <span class="truncate">Revoke Access</span>
+                                                </div>
+                                            </button>
+                                        </td>
+                                    </tr>`;
+                        });
+                    }
 
-                let infoText = `<div class="p-10 mb-20 bg-info-lm bg-info-dm rounded">
-                                    <p><strong>Verified Players</strong></p>
-                                </div>`;
+                    table += '</table>';
 
-                if (clientsData.length === 0) {
-                    table += header;
-                    table += `<tr><td colspan="2">No players are currently verified.</td></tr>`;
-                } else {
-                    table += header;
-                    clientsData.forEach(client => {
-                        table += `<tr>
-                                    <td>
-                                        <a href="/Client/Profile/${client.clientId}" class="level-color-${client.level.toLowerCase()} no-decoration">${client.currentAlias.name.stripColors()}</a>
-                                    </td>
-                                    <td>
-                                        <a href="#" class="profile-action no-decoration float-right" data-action="DynamicAction" data-action-id="${client.clientId}"
-                                           data-action-meta="${encodeURI(JSON.stringify(disallowInteraction))}">
-                                            <div class="btn">
-                                                <i class="oi oi-circle-x mr-5 font-size-12"></i>
-                                                <span class="text-truncate">Remove Verification</span>
-                                            </div>
-                                        </a>
-                                    </td>
-                                </tr>`;
-                    });
+                    return table;
+                } catch (error) {
+                    plugin.logger.logError('Error generating access control list: {Error}', error.message);
+                    return `<div class="p-4 rounded-lg bg-red-600/20 border border-red-500/30 text-red-400">An error occurred while loading data.</div>`;
                 }
-
-                table += '</table>';
-
-                return infoText + table;
             };
 
             return interactionData;
@@ -268,54 +264,57 @@ const plugin = {
             const helpers = importNamespace('SharedLibraryCore.Helpers');
             const interactionData = new helpers.InteractionData();
 
-            interactionData.name = 'Verification Monitor';
-            interactionData.description = 'Monitor verified players and kick logs for client ID ' + clientIdThreshold + '+ on ports: ' + monitoredPorts.join(', ');
-            interactionData.displayMeta = 'oi-shield';
+            interactionData.name = 'Access Monitor';
+            interactionData.description = `View access control activity and kick logs for Client ID ${clientIdThreshold}+ on ports: ${monitoredPorts.join(', ')}`;
+            interactionData.displayMeta = 'ph-shield-check';
             interactionData.interactionId = verificationMonitorKey;
             interactionData.minimumPermission = 3;
             interactionData.interactionType = 2;
             interactionData.source = plugin.name;
 
             interactionData.scriptAction = (sourceId, targetId, game, meta, token) => {
-                // Settings Section
-                let settingsInfo = `<div class="p-10 mb-20 bg-primary-lm bg-primary-dm rounded">
-                                        <p><strong>Current Settings</strong></p>
-                                        <p><code>!setclientidthreshold &lt;number&gt;</code> - Current: <strong>${clientIdThreshold}</strong></p>
-                                        <p><code>!setmonitoredports &lt;ports&gt;</code> - Current: <strong>${monitoredPorts.join(', ')}</strong></p>
-                                    </div>`;
+                try {
+                    // Settings Section
+                    let settingsInfo = `<div class="mb-6 p-4 rounded-lg bg-primary/10 border border-primary/30">
+                                            <h3 class="text-sm font-semibold mb-3 flex items-center gap-2"><i class="ph ph-gear"></i> Access Control Settings</h3>
+                                            <div class="space-y-2">
+                                                <p class="text-xs text-muted"><strong>Client ID Threshold:</strong> <span class="inline-block px-2 py-0.5 rounded bg-surface text-primary font-mono">${clientIdThreshold}</span> - Players above this ID require verification</p>
+                                                <p class="text-xs text-muted"><strong>Monitored Ports:</strong> <span class="inline-block px-2 py-0.5 rounded bg-surface text-primary font-mono">${monitoredPorts.join(', ')}</span> - Ports where access control is active</p>
+                                                <p class="text-xs text-muted mt-3"><code class="px-2 py-1 rounded bg-surface">!setclientidthreshold &lt;number&gt;</code> or <code class="px-2 py-1 rounded bg-surface">!setmonitoredports &lt;ports&gt;</code> to change</p>
+                                            </div>
+                                        </div>`;
 
-                // Recently Kicked Players Section
-                let kickedTable = '<h4 class="mt-20 mb-10">Recently Kicked Players (Last 50)</h4>';
-                kickedTable += '<table class="table bg-dark-dm bg-light-lm">';
-                let kickedHeader = `<tr>
-                                <th>Client ID</th>
-                                <th>Player Name</th>
-                                <th>IP Address</th>
-                                <th>Server</th>
-                                <th>Time</th>
-                              </tr>`;
+                    // Recently Kicked Players Section
+                    let kickedTable = `<div class="mb-3 flex items-center gap-2">
+                                            <i class="ph ph-user-minus text-red-400"></i>
+                                            <h4 class="text-lg font-semibold">Recent Access Denials</h4>
+                                            <span class="text-xs px-2 py-0.5 rounded bg-surface text-muted">Last 50</span>
+                                        </div>`;
+                    kickedTable += '<table class="w-full text-left border-collapse">';
 
-                if (kickedPlayers.length === 0) {
-                    kickedTable += kickedHeader;
-                    kickedTable += `<tr><td colspan="5">No players have been kicked yet.</td></tr>`;
-                } else {
-                    kickedTable += kickedHeader;
-                    kickedPlayers.forEach(player => {
-                        const timeAgo = plugin.getTimeAgo(player.timestamp);
-                        const playerName = player.name ? player.name.stripColors() : 'Unknown';
-                        const serverName = player.server ? player.server.stripColors() : 'Unknown';
-                        kickedTable += `<tr>
-                                    <td><span class="badge badge-danger">${player.clientId}</span></td>
-                                    <td><a href="/Client/Profile/${player.clientId}" class="no-decoration">${playerName}</a></td>
-                                    <td><code>${player.ipAddress}</code></td>
-                                    <td>${serverName}</td>
-                                    <td>${timeAgo}</td>
-                                </tr>`;
-                    });
+                    if (kickedPlayers.length === 0) {
+                        kickedTable += `<tr><td colspan="5" class="px-6 py-8 text-center text-muted">No access denials recorded yet.</td></tr>`;
+                    } else {
+                        kickedPlayers.forEach(player => {
+                            const timeAgo = plugin.getTimeAgo(player.timestamp);
+                            const playerName = plugin.escapeHtml(player.name ? player.name.stripColors() : 'Unknown');
+                            const serverName = plugin.escapeHtml(player.server ? player.server.stripColors() : 'Unknown');
+                            kickedTable += `<tr class="border-t border-line hover:bg-surface-hover/30 transition-colors">
+                                        <td class="px-6 py-4"><span class="inline-block px-2 py-1 rounded text-xs font-medium bg-red-600/20 text-red-400 border border-red-500/30">${player.clientId}</span></td>
+                                        <td class="px-6 py-4"><a href="/Client/Profile/${player.clientId}" class="text-sm font-medium hover:text-primary transition-colors">${playerName}</a></td>
+                                        <td class="px-6 py-4"><code class="text-xs px-2 py-1 rounded bg-surface">${plugin.escapeHtml(player.ipAddress)}</code></td>
+                                        <td class="px-6 py-4 text-sm text-muted">${serverName}</td>
+                                        <td class="px-6 py-4 text-sm text-muted">${timeAgo}</td>
+                                    </tr>`;
+                        });
+                    }
+                    kickedTable += '</table>';
+
+                    return settingsInfo + kickedTable;
+                } catch (error) {
+                    plugin.logger.logError('Error generating verification monitor: {Error}', error.message);
+                    return `<div class="p-4 rounded-lg bg-red-600/20 border border-red-500/30 text-red-400">An error occurred while loading data.</div>`;
                 }
-                kickedTable += '</table>';
-
-                return settingsInfo + kickedTable;
             };
 
             return interactionData;
@@ -336,9 +335,8 @@ const plugin = {
         this.configWrapper = configWrapper;
         this.pluginHelper = pluginHelper;
         this.manager = this.serviceResolver.resolveService('IManager');
-        // get logger without category to avoid missing overload
-        this.logger = this.serviceResolver.resolveService('ILogger');
-        this.translations = this.serviceResolver.resolveService('ITranslationLookup');
+        // Use ScriptPluginV2 category for logger
+        this.logger = this.serviceResolver.resolveService('ILogger', ['ScriptPluginV2']);
 
         this.configWrapper.setName(this.name);
 
@@ -419,24 +417,25 @@ const plugin = {
         this.syncManualAllowedToFile();
 
         // Log startup state
-        this.logger.writeInfo(`[xoxosystem] Loaded: enabled=${this.enabled}, threshold=${clientIdThreshold}, monitoredPorts=${monitoredPorts.join(',')}, allowedIds=${allowedPlayerIds.length}`);
+        this.logger.logInformation('{Name} {Version} by {Author} loaded. Enabled={Enabled}, Threshold={Threshold}, MonitoredPorts={Ports}, AllowedPlayers={Count}',
+            this.name, this.version, this.author, this.enabled, clientIdThreshold, monitoredPorts.join(','), allowedPlayerIds.length);
     },
 
     checkPlayerAccess: async function (client, _) {
-        this.logger.writeInfo(`[xoxosystem] checkPlayerAccess called for clientId=${client.clientId}, port=${client.currentServer.port}`);
+        this.logger.logDebug('checkPlayerAccess called for ClientId={ClientId}, Port={Port}', client.clientId, client.currentServer.port);
         if (!this.enabled) {
-            this.logger.writeInfo('[xoxosystem] Plugin not enabled');
+            this.logger.logDebug('Plugin not enabled');
             return;
         }
         // Check server port - only filter on configured monitored ports
         const serverPort = client.currentServer.port;
         if (!monitoredPorts.includes(serverPort)) {
-            this.logger.writeInfo(`[xoxosystem] Port ${serverPort} not monitored`);
+            this.logger.logDebug('Port {Port} not monitored', serverPort);
             return;
         }
         // Allow players with client ID at or below threshold automatically
         if (parseInt(client.clientId) <= clientIdThreshold) {
-            this.logger.writeInfo(`[xoxosystem] clientId ${client.clientId} <= threshold ${clientIdThreshold}, not kicking`);
+            this.logger.logDebug('ClientId {ClientId} <= threshold {Threshold}, not kicking', client.clientId, clientIdThreshold);
             return;
         }
         // For players above threshold, check if they're in the verified/linked lists
@@ -449,12 +448,12 @@ const plugin = {
         });
 
         if (isExempt) {
-            this.logger.writeInfo(`[xoxosystem] clientId ${client.clientId} is exempt (manual or discord link)`);
+            this.logger.logDebug('ClientId {ClientId} is exempt (manual or discord link)', client.clientId);
             return;
         }
         // Players above client ID threshold who are not verified get kicked
         if (parseInt(client.clientId) > clientIdThreshold) {
-            this.logger.writeInfo(`[xoxosystem] Kicking clientId ${client.clientId} (threshold ${clientIdThreshold})`);
+            this.logger.logInformation('Kicking ClientId {ClientId} (above threshold {Threshold})', client.clientId, clientIdThreshold);
             // Generate verification code
             const verificationCode = this.generateVerificationCode();
             
@@ -480,13 +479,21 @@ const plugin = {
             this.configWrapper.setValue('kickedPlayers', kickedPlayers);
             
             // Log verification details to console/logs (private)
-            this.logger.writeInfo(`[xoxosystem] Player ${client.cleanedName} kicked - ClientID: ${client.clientId}, PIN: ${verificationCode}`);
-            client.tell(`^1Your ClientID: ${client.clientId}`);
-            client.tell(`^1Your PIN: ${verificationCode}`);
-            client.tell(`^7Join Discord: ^2discord.ceylonwarfare.tech ^7and use: ^2/link ${client.clientId} ${verificationCode}`);
-            client.tell(`^7PIN expires in ^2120 seconds`);
+            this.logger.logInformation('Player {Name} kicked - ClientID: {ClientId}, PIN: {PIN}', client.cleanedName, client.clientId, verificationCode);
+            client.tell(`^3╔════════════════════════════════════════╗`);
+            client.tell(`^3║ ^7SERVER ACCESS VERIFICATION REQUIRED ^3║`);
+            client.tell(`^3╠════════════════════════════════════════╣`);
+            client.tell(`^3║ ^7Your Client ID: ^5${client.clientId.toString().padEnd(22)} ^3║`);
+            client.tell(`^3║ ^7Your PIN Code:  ^1${verificationCode.padEnd(22)} ^3║`);
+            client.tell(`^3╠════════════════════════════════════════╣`);
+            client.tell(`^3║ ^21. Join Discord: discord.ceylonwarfare.tech ^3║`);
+            client.tell(`^3║ ^22. Use command: ^5/link ${client.clientId} ${verificationCode.padEnd(10)} ^3║`);
+            client.tell(`^3║ ^23. Rejoin server after verification   ^3║`);
+            client.tell(`^3╠════════════════════════════════════════╣`);
+            client.tell(`^3║ ^1⚠ PIN expires in 120 seconds         ^3║`);
+            client.tell(`^3╚════════════════════════════════════════╝`);
             
-            client.kick(`^7New players require Discord verification. ^2Press Shift + ~ ^7to open console and check your ClientID and PIN.`,
+            client.kick(`^7Access verification required. ^2Check console (Shift + ~) ^7for your Client ID and PIN. ^1Discord: discord.ceylonwarfare.tech`,
                 client.currentServer.asConsoleClient());
             return;
         }
@@ -541,10 +548,10 @@ const plugin = {
             // Sync to Discord bot file
             this.syncVerificationsToFile();
             
-            this.logger.writeInfo(`[xoxosystem] Verification code ${verificationCode} saved for player ${playerName} (ID: ${clientId})`);
+            this.logger.logDebug('Verification code {Code} saved for player {Name} (ID: {ClientId})', verificationCode, playerName, clientId);
             return true;
         } catch (e) {
-            this.logger.writeError(`[xoxosystem] Failed to save verification: ${e.message}`);
+            this.logger.logError('Failed to save verification: {Error}', e.message);
             return false;
         }
     },
@@ -573,7 +580,7 @@ const plugin = {
             
             return true;
         } catch (e) {
-            this.logger.writeError(`[xoxosystem] Failed to sync verifications to file: ${e.message}`);
+            this.logger.logError('Failed to sync verifications to file: {Error}', e.message);
             return false;
         }
     },
@@ -602,7 +609,7 @@ const plugin = {
             this.rebuildAllowedFromSources();
             return true;
         } catch (e) {
-            this.logger.writeError(`[xoxosystem] Failed to sync linked profiles: ${e.message}`);
+            this.logger.logError('Failed to sync linked profiles: {Error}', e.message);
             return false;
         }
     },
@@ -612,9 +619,23 @@ const plugin = {
             IO.File.WriteAllText(manualAllowedFilePath, JSON.stringify(manualAllowedIds, null, 2));
             return true;
         } catch (e) {
-            this.logger.writeError(`[xoxosystem] Failed to sync manual allowed to file: ${e.message}`);
+            this.logger.logError('Failed to sync manual allowed to file: {Error}', e.message);
             return false;
         }
+    },
+
+    escapeHtml: function (text) {
+        if (!text) return '';
+        
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        
+        return String(text).replace(/[&<>"']/g, m => map[m]);
     }
 };
 
