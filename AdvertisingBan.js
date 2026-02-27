@@ -1,5 +1,3 @@
-const advertisingBansKey = 'Webfront::Nav::Admin::AdvertisingBans';
-
 const init = (registerNotify, serviceResolver, configWrapper) => {
     plugin.onLoad(serviceResolver, configWrapper);
 
@@ -11,7 +9,7 @@ const init = (registerNotify, serviceResolver, configWrapper) => {
 };
 
 const plugin = {
-    author: 'IW4M-Admin',
+    author: 'xoxod33p',
     version: '1.1',
     name: 'Advertising Ban',
     config: {
@@ -34,50 +32,24 @@ const plugin = {
     translations: null,
     configWrapper: null,
     serviceResolver: null,
-    interactionRegistration: null,
 
     // Regex patterns for detection
     patterns: {
         // Matches URLs with common protocols and domains
         url: /(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9-]+\.(?:com|net|org|gg|me|io|co|uk|de|fr|ru|cn|tv|cc|xyz|info|biz|eu|us|ca|au|tk|ga|ml|cf|gq|online|site|website|space|live|store|tech|club|top|fun|pro|host|pw|vip|cloud|zone|download|click|link|stream|bet|win|game|games|party|racing|trade|date|review|news|blog|shop|app)(?:\/[^\s]*)?/i,
         
-        // Matches IPv4 addresses (with dots or with spaces/dashes as separators)
-        ipv4: /\b(?:\d{1,3}[.\s\-_:]{1,3}){3}\d{1,3}\b/,
+        // Matches IPv4 addresses (STRICT: only actual dots, must look like real IP)
+        ipv4: /\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b/,
+        
+        // Matches spaced IP addresses (people trying to bypass: 192 168 1 1)
+        ipv4Spaced: /\b(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\b/,
         
         // Matches common domain patterns even without protocol
         domain: /[a-zA-Z0-9-]+\s*(?:dot|\.)\s*(?:com|net|org|gg|me|io|co|uk|de|fr|ru|tv|cc|xyz|info|biz|online|site|website)/i,
         
-        // Matches "join" or "visit" followed by domain-like text
-        invite: /(?:join|visit|check\s*out|go\s*to|play\s*at|play\s*on)\s+[a-zA-Z0-9-]+\s*[.\s]\s*[a-zA-Z]{2,}/i
+        // Patterns to IGNORE (game-related false positives)
+        gamePatterns: /(?:red\s*dot|blue\s*dot|green\s*dot|enemy\s*at|team|kill|score|round|point|level|rank|kd|k\/d|\d+\s*-\s*\d+)/i
     },
-
-    interactions: [{
-        name: advertisingBansKey,
-        action: function (_, __, ___) {
-            const helpers = importNamespace('SharedLibraryCore.Helpers');
-            const interactionData = new helpers.InteractionData();
-
-            interactionData.name = 'Advertising Bans';
-            interactionData.description = 'View all advertising-related bans';
-            interactionData.displayMeta = 'ph-megaphone';
-            interactionData.interactionId = advertisingBansKey;
-            interactionData.minimumPermission = 2; // Moderator+
-            interactionData.interactionType = 2; // Page/View type
-            interactionData.source = plugin.name;
-
-            interactionData.scriptAction = (sourceId, targetId, game, meta, token) => {
-                try {
-                    const result = plugin.getAdvertisingBans();
-                    return plugin.generateAdvertisingBansHtml(result);
-                } catch (error) {
-                    plugin.logger.logError('Error generating advertising bans list: {Error}', error.message);
-                    return `<div class="p-4 rounded-lg bg-red-600/20 border border-red-500/30 text-red-400">An error occurred while loading advertising bans.</div>`;
-                }
-            };
-
-            return interactionData;
-        }
-    }],
 
     onClientMessage: function (messageEvent) {
         if (!this.config.enabled) {
@@ -94,6 +66,12 @@ const plugin = {
 
         // Check if message contains advertising
         if (this.isAdvertising(message)) {
+            // Skip if an active advertising ban already exists to avoid duplicates
+            if (this.hasActiveAdvertisingBan(client.clientId)) {
+                this.logger.logInformation(`Client ${client.name} (${client.clientId}) already has an active advertising ban; skipping new ban`);
+                return;
+            }
+
             this.logger.logInformation(`Client ${client.name} (${client.clientId}) detected advertising: "${message}"`);
             
             // Issue temp ban through penalty service to ensure it appears in penalties tab
@@ -141,12 +119,47 @@ const plugin = {
         }
     },
 
+    hasActiveAdvertisingBan: function (clientId) {
+        const contextFactory = this.serviceResolver.resolveService('IDatabaseContextFactory');
+        const context = contextFactory.createContext(false);
+
+        try {
+            const penalties = context.penalties
+                .where(p => p.offenderId === clientId && p.active === true)
+                .orderByDescending(p => p.when)
+                .toList();
+
+            for (let i = 0; i < penalties.length; i++) {
+                const penalty = penalties[i];
+                const typeStr = penalty.type.toString();
+                const offense = (penalty.offense || '').toLowerCase();
+
+                if ((typeStr === 'Ban' || typeStr === 'TempBan') && offense.includes('advertising')) {
+                    context.dispose();
+                    return true;
+                }
+            }
+
+            context.dispose();
+            return false;
+        } catch (error) {
+            context.dispose();
+            this.logger.logError('Error checking existing advertising ban for client {ClientId}: {Error}', clientId, error.message);
+            return false;
+        }
+    },
+
     isAdvertising: function (message) {
         if (!message || message.length === 0) {
             return false;
         }
 
         const lowerMessage = message.toLowerCase();
+
+        // Skip game-related callouts to avoid false positives (red dot, scores, etc.)
+        if (this.patterns.gamePatterns.test(lowerMessage)) {
+            return false;
+        }
 
         // Check against whitelist
         for (let i = 0; i < this.config.whitelist.length; i++) {
@@ -163,41 +176,41 @@ const plugin = {
             if (this.patterns.domain.test(message)) {
                 return true;
             }
-            if (this.patterns.invite.test(message)) {
-                return true;
-            }
         }
 
         // Check for IP addresses if enabled
         if (this.config.checkIps) {
-            if (this.patterns.ipv4.test(message)) {
-                // Validate it's actually an IP-like pattern (not a random number sequence)
-                const ipMatch = message.match(this.patterns.ipv4);
-                if (ipMatch) {
-                    const cleaned = ipMatch[0].replace(/[\s\-_:]/g, '.');
-                    const parts = cleaned.split('.');
+            // Check for standard IP format (192.168.1.1)
+            const ipMatch = message.match(this.patterns.ipv4);
+            if (ipMatch) {
+                const parts = [parseInt(ipMatch[1]), parseInt(ipMatch[2]), parseInt(ipMatch[3]), parseInt(ipMatch[4])];
+                
+                // Validate each octet is valid (0-255)
+                const validOctets = parts.every(p => !isNaN(p) && p >= 0 && p <= 255);
+                
+                if (validOctets) {
+                    // Skip common false positives:
+                    // - Version numbers (1.0.0.0, 2.0.0.1)
+                    // - Dates that look like IPs
+                    // - Low number patterns (typically not real server IPs)
+                    const hasServerLikeOctet = parts.some(p => p >= 100); // Real server IPs usually have larger octets
+                    const isLikelyVersion = parts[0] <= 10 && parts[1] <= 10; // Version patterns like 1.2.3.4
                     
-                    // Check if it looks like a valid IP (not scores or random numbers)
-                    if (parts.length === 4) {
-                        let validIpPattern = true;
-                        for (let i = 0; i < parts.length; i++) {
-                            const num = parseInt(parts[i]);
-                            if (isNaN(num) || num < 0 || num > 255) {
-                                validIpPattern = false;
-                                break;
-                            }
-                        }
-                        
-                        // Additional check: avoid false positives from scores like "10 - 5"
-                        // Real IPs being advertised usually have larger numbers
-                        if (validIpPattern) {
-                            // If at least one octet is >= 50, likely an IP address
-                            const hasLargerNumber = parts.some(p => parseInt(p) >= 50);
-                            if (hasLargerNumber) {
-                                return true;
-                            }
-                        }
+                    if (hasServerLikeOctet && !isLikelyVersion) {
+                        return true;
                     }
+                }
+            }
+            
+            // Check for spaced IP addresses (people trying to bypass: 192 168 1 1)
+            const spacedMatch = message.match(this.patterns.ipv4Spaced);
+            if (spacedMatch) {
+                const parts = [parseInt(spacedMatch[1]), parseInt(spacedMatch[2]), parseInt(spacedMatch[3]), parseInt(spacedMatch[4])];
+                const validOctets = parts.every(p => !isNaN(p) && p >= 0 && p <= 255);
+                const hasServerLikeOctet = parts.some(p => p >= 100);
+                
+                if (validOctets && hasServerLikeOctet) {
+                    return true;
                 }
             }
         }
@@ -224,196 +237,8 @@ const plugin = {
             this.configWrapper.setValue('config', this.config);
         }
 
-        // Register webfront interaction
-        this.interactionRegistration = serviceResolver.resolveService('IInteractionRegistration');
-        this.interactionRegistration.unregisterInteraction(advertisingBansKey);
-
         this.logger.logInformation('AdvertisingBan {version} by {author} loaded. Enabled={Enabled}, BanDuration={Days} days', 
             this.version, this.author, this.config.enabled, this.config.banDurationDays);
-    },
-
-    getAdvertisingBans: function () {
-        const contextFactory = this.serviceResolver.resolveService('IDatabaseContextFactory');
-        const context = contextFactory.createContext(false);
-        
-        try {
-            const EFPenalty = importNamespace('Data.Models').EFPenalty;
-            
-            // Get all active penalties (both automated and manual) where offense contains "Advertising"
-            const activePenalties = context.penalties
-                .where(p => p.active === true)
-                .orderByDescending(p => p.when)
-                .toList();
-            
-            this.logger.logInformation('Found {Count} active penalties total', activePenalties.length);
-            
-            // Filter for advertising bans in memory
-            const advertisingBans = [];
-            for (let i = 0; i < activePenalties.length; i++) {
-                const penalty = activePenalties[i];
-                const typeStr = penalty.type.toString();
-                const offense = penalty.offense || '';
-                
-                if ((typeStr === 'Ban' || typeStr === 'TempBan') && 
-                    offense.toLowerCase().includes('advertising')) {
-                    advertisingBans.push(penalty);
-                }
-            }
-            
-            this.logger.logInformation('Found {Count} advertising bans out of {Total} active penalties', 
-                advertisingBans.length, activePenalties.length);
-            
-            // Get unique client IDs
-            const offenderIds = [];
-            const punisherIds = [];
-            
-            for (let i = 0; i < advertisingBans.length; i++) {
-                if (!offenderIds.includes(advertisingBans[i].offenderId)) {
-                    offenderIds.push(advertisingBans[i].offenderId);
-                }
-                if (!punisherIds.includes(advertisingBans[i].punisherId)) {
-                    punisherIds.push(advertisingBans[i].punisherId);
-                }
-            }
-            
-            // Fetch client data in bulk
-            const clientSet = context.clients;
-            const offenders = clientSet.getClientsBasicData(offenderIds);
-            const punishers = clientSet.getClientsBasicData(punisherIds);
-            
-            // Map client data
-            const offenderMap = {};
-            const punisherMap = {};
-            
-            for (let i = 0; i < offenders.length; i++) {
-                offenderMap[offenders[i].clientId] = offenders[i];
-            }
-            
-            for (let i = 0; i < punishers.length; i++) {
-                punisherMap[punishers[i].clientId] = punishers[i];
-            }
-            
-            // Attach client data to penalties
-            const result = [];
-            for (let i = 0; i < advertisingBans.length; i++) {
-                const ban = advertisingBans[i];
-                result.push({
-                    penalty: ban,
-                    offender: offenderMap[ban.offenderId],
-                    punisher: punisherMap[ban.punisherId]
-                });
-            }
-            
-            context.dispose();
-            return result;
-        } catch (error) {
-            context.dispose();
-            this.logger.logError('Error fetching advertising bans: {Error}', error.message);
-            return [];
-        }
-    },
-
-    generateAdvertisingBansHtml: function (bans) {
-        let html = `<div class="mb-6 p-4 rounded-lg bg-yellow-600/10 border border-yellow-500/30">
-                        <div class="flex items-center gap-2 mb-2">
-                            <i class="ph ph-megaphone text-yellow-400"></i>
-                            <h3 class="text-sm font-semibold">Advertising Bans</h3>
-                        </div>
-                        <p class="text-xs text-muted">Total active advertising bans: <span class="text-primary font-bold">${bans.length}</span></p>
-                    </div>`;
-        
-        html += '<table class="w-full text-left border-collapse">';
-        html += `<thead>
-                    <tr class="border-b border-line">
-                        <th class="px-6 py-3 text-xs font-semibold uppercase text-muted">Player</th>
-                        <th class="px-6 py-3 text-xs font-semibold uppercase text-muted">Offense</th>
-                        <th class="px-6 py-3 text-xs font-semibold uppercase text-muted">Banned By</th>
-                        <th class="px-6 py-3 text-xs font-semibold uppercase text-muted">When</th>
-                        <th class="px-6 py-3 text-xs font-semibold uppercase text-muted">Expires</th>
-                    </tr>
-                 </thead>
-                 <tbody>`;
-        
-        if (bans.length === 0) {
-            html += `<tr><td colspan="5" class="px-6 py-8 text-center text-muted">No advertising bans found.</td></tr>`;
-        } else {
-            for (let i = 0; i < bans.length; i++) {
-                const ban = bans[i];
-                const penalty = ban.penalty;
-                const offender = ban.offender;
-                const punisher = ban.punisher;
-                
-                const offenderName = this.escapeHtml(offender?.currentAlias?.name?.stripColors() || 'Unknown');
-                const punisherName = this.escapeHtml(punisher?.currentAlias?.name?.stripColors() || 'Console');
-                const offense = this.escapeHtml(penalty.offense || 'No reason specified');
-                
-                const whenDate = new Date(penalty.when.toString());
-                const whenStr = this.getTimeAgo(whenDate);
-                
-                let expiresStr = 'Permanent';
-                if (penalty.expires) {
-                    const expiresDate = new Date(penalty.expires.toString());
-                    expiresStr = this.getTimeUntil(expiresDate);
-                }
-                
-                html += `<tr class="border-t border-line hover:bg-surface-hover/30 transition-colors">
-                            <td class="px-6 py-4">
-                                <a href="/Client/Profile/${offender?.clientId}" class="text-sm font-medium hover:text-primary transition-colors">${offenderName}</a>
-                            </td>
-                            <td class="px-6 py-4 text-sm text-muted max-w-md truncate">${offense}</td>
-                            <td class="px-6 py-4">
-                                ${punisher?.clientId ? `<a href="/Client/Profile/${punisher.clientId}" class="text-sm hover:text-primary transition-colors">${punisherName}</a>` : `<span class="text-sm text-muted">${punisherName}</span>`}
-                            </td>
-                            <td class="px-6 py-4 text-sm text-muted">${whenStr}</td>
-                            <td class="px-6 py-4 text-sm text-muted">${expiresStr}</td>
-                         </tr>`;
-            }
-        }
-        
-        html += '</tbody></table>';
-        return html;
-    },
-
-    getTimeAgo: function (date) {
-        const now = new Date();
-        const diffMs = now - date;
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMs / 3600000);
-        const diffDays = Math.floor(diffMs / 86400000);
-
-        if (diffMins < 1) return 'Just now';
-        if (diffMins < 60) return `${diffMins}m ago`;
-        if (diffHours < 24) return `${diffHours}h ago`;
-        return `${diffDays}d ago`;
-    },
-
-    getTimeUntil: function (date) {
-        const now = new Date();
-        const diffMs = date - now;
-        
-        if (diffMs <= 0) return 'Expired';
-        
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMs / 3600000);
-        const diffDays = Math.floor(diffMs / 86400000);
-
-        if (diffMins < 60) return `${diffMins}m left`;
-        if (diffHours < 24) return `${diffHours}h left`;
-        return `${diffDays}d left`;
-    },
-
-    escapeHtml: function (text) {
-        if (!text) return '';
-        
-        const map = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        };
-        
-        return String(text).replace(/[&<>"']/g, m => map[m]);
     }
 };
 
